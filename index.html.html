@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Photobooth Beragam Template</title>
+    <!-- Tailwind CSS untuk styling -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-100 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-6 text-center">
+        <h1 class="text-2xl font-bold text-slate-800 mb-1">Virtual Photobooth</h1>
+        <p class="text-sm text-slate-500 mb-4">Pilih gaya template strip kamu sebelum mulai sesi.</p>
+
+        <!-- Pilihan Template -->
+        <div class="grid grid-cols-3 gap-2 mb-4">
+            <button onclick="setTemplate('classic')" id="btn-classic" class="p-2 border-2 border-indigo-600 bg-indigo-50 rounded-xl text-xs font-semibold text-indigo-700 transition cursor-pointer">
+                Klasik Vertikal
+            </button>
+            <button onclick="setTemplate('retro')" id="btn-retro" class="p-2 border-2 border-slate-200 rounded-xl text-xs font-semibold text-slate-600 transition cursor-pointer">
+                Retro Film
+            </button>
+            <button onclick="setTemplate('modern')" id="btn-modern" class="p-2 border-2 border-slate-200 rounded-xl text-xs font-semibold text-slate-600 transition cursor-pointer">
+                Modern Grid
+            </button>
+        </div>
+
+        <!-- Area Kamera / Live View -->
+        <div class="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden shadow-inner mb-4">
+            <video id="videoElement" autoplay playsinline class="w-full h-full object-cover -scale-x-100"></video>
+            <!-- Overlay Hitungan Mundur -->
+            <div id="countdownDisplay" class="absolute inset-0 flex items-center justify-center text-white text-6xl font-black bg-black/40 hidden">
+                3
+            </div>
+        </div>
+
+        <!-- Tombol Mulai -->
+        <button id="startBtn" onclick="startPhotoSession()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition duration-200 shadow-md cursor-pointer">
+            Mulai Sesi Foto (4 Foto)
+        </button>
+
+        <!-- Status Teks -->
+        <p id="statusText" class="text-xs text-slate-400 mt-3">Siap mengambil foto</p>
+    </div>
+
+    <!-- Container Hasil Strip Foto -->
+    <div id="resultContainer" class="hidden max-w-md w-full bg-white rounded-2xl shadow-xl p-6 mt-6 text-center">
+        <h2 class="text-xl font-bold text-slate-800 mb-3">Strip Foto Kamu!</h2>
+        <div class="flex justify-center mb-4 overflow-x-auto">
+            <canvas id="resultCanvas" class="border border-slate-200 rounded-lg shadow-sm max-h-96"></canvas>
+        </div>
+        <div class="flex gap-3">
+            <button onclick="downloadPhoto()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-xl transition duration-200 cursor-pointer">
+                Download Strip
+            </button>
+            <button onclick="resetApp()" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2.5 rounded-xl transition duration-200 cursor-pointer">
+                Ulangi
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('videoElement');
+        const startBtn = document.getElementById('startBtn');
+        const countdownDisplay = document.getElementById('countdownDisplay');
+        const statusText = document.getElementById('statusText');
+        const resultContainer = document.getElementById('resultContainer');
+        const resultCanvas = document.getElementById('resultCanvas');
+
+        let stream = null;
+        const capturedImages = [];
+        let selectedTemplate = 'classic'; // Pilihan default
+
+        // Fungsi Mengganti Template
+        function setTemplate(type) {
+            selectedTemplate = type;
+            ['classic', 'retro', 'modern'].forEach(t => {
+                const btn = document.getElementById(`btn-${t}`);
+                if (t === type) {
+                    btn.className = "p-2 border-2 border-indigo-600 bg-indigo-50 rounded-xl text-xs font-semibold text-indigo-700 transition cursor-pointer";
+                } else {
+                    btn.className = "p-2 border-2 border-slate-200 rounded-xl text-xs font-semibold text-slate-600 transition cursor-pointer";
+                }
+            });
+        }
+
+        // Inisialisasi Kamera Web
+        async function initCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+                video.srcObject = stream;
+            } catch (err) {
+                alert('Tidak dapat mengakses kamera. Pastikan izin kamera telah diberikan.');
+                console.error(err);
+            }
+        }
+
+        initCamera();
+
+        // Hitungan Mundur dan Pengambilan 4 Foto
+        async function startPhotoSession() {
+            capturedImages.length = 0;
+            startBtn.disabled = true;
+            startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            resultContainer.classList.add('hidden');
+
+            for (let i = 1; i <= 4; i++) {
+                statusText.innerText = `Mengambil foto ke-${i} dari 4...`;
+                await runCountdown();
+                captureFrame();
+            }
+
+            statusText.innerText = 'Selesai!';
+            generatePhotoStrip();
+        }
+
+        // Helper Hitungan Mundur (3 Detik)
+        function runCountdown() {
+            return new Promise((resolve) => {
+                let count = 3;
+                countdownDisplay.innerText = count;
+                countdownDisplay.classList.remove('hidden');
+
+                const interval = setInterval(() => {
+                    count--;
+                    if (count > 0) {
+                        countdownDisplay.innerText = count;
+                    } else {
+                        clearInterval(interval);
+                        countdownDisplay.classList.add('hidden');
+                        resolve();
+                    }
+                }, 1000);
+            });
+        }
+
+        // Ambil Gambar dari Video Stream
+        function captureFrame() {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            capturedImages.push(canvas);
+        }
+
+        // Generator Strip Berdasarkan Template yang Dipilih
+        function generatePhotoStrip() {
+            const ctx = resultCanvas.getContext('2d');
+            const imgWidth = 500;
+            const imgHeight = (video.videoHeight / video.videoWidth) * imgWidth;
+
+            if (selectedTemplate === 'classic') {
+                // Layout 1: Klasik Vertikal (4 baris ke bawah dengan latar putih bersih)
+                const padding = 35;
+                const gap = 18;
+                const headerHeight = 70;
+
+                resultCanvas.width = imgWidth + (padding * 2);
+                resultCanvas.height = headerHeight + (imgHeight * 4) + (gap * 3) + (padding * 2);
+
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, resultCanvas.width, resultCanvas.height);
+
+                ctx.fillStyle = '#1e293b';
+                ctx.font = 'bold 24px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('OUR MOMENT', resultCanvas.width / 2, padding + 25);
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#64748b';
+                ctx.fillText(new Date().toLocaleDateString(), resultCanvas.width / 2, padding + 48);
+
+                let currentY = padding + headerHeight;
+                capturedImages.forEach((img) => {
+                    ctx.drawImage(img, padding, currentY, imgWidth, imgHeight);
+                    currentY += imgHeight + gap;
+                });
+
+            } else if (selectedTemplate === 'retro') {
+                // Layout 2: Retro Film (Gaya strip negatif film hitam dengan aksen tebal)
+                const padding = 30;
+                const gap = 15;
+                const headerHeight = 60;
+
+                resultCanvas.width = imgWidth + (padding * 2);
+                resultCanvas.height = headerHeight + (imgHeight * 4) + (gap * 3) + (padding * 2);
+
+                ctx.fillStyle = '#111827'; // Hitam ala film
+                ctx.fillRect(0, 0, resultCanvas.width, resultCanvas.height);
+
+                ctx.fillStyle = '#f3f4f6';
+                ctx.font = 'bold 22px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('★ RETRO BOOTH ★', resultCanvas.width / 2, padding + 25);
+
+                let currentY = padding + headerHeight;
+                capturedImages.forEach((img) => {
+                    // Berikan border tipis dalam gaya strip film
+                    ctx.fillStyle = '#000000';
+                    ctx.fillRect(padding - 5, currentY - 5, imgWidth + 10, imgHeight + 10);
+                    ctx.drawImage(img, padding, currentY, imgWidth, imgHeight);
+                    currentY += imgHeight + gap;
+                });
+
+            } else if (selectedTemplate === 'modern') {
+                // Layout 3: Modern Grid 2x2 (Menyusun 4 foto jadi bentuk kotak grid)
+                const padding = 40;
+                const gap = 20;
+                const headerHeight = 70;
+                const halfWidth = 240;
+                const halfHeight = (video.videoHeight / video.videoWidth) * halfWidth;
+
+                resultCanvas.width = (halfWidth * 2) + gap + (padding * 2);
+                resultCanvas.height = headerHeight + (halfHeight * 2) + gap + (padding * 2);
+
+                ctx.fillStyle = '#f8fafc';
+                ctx.fillRect(0, 0, resultCanvas.width, resultCanvas.height);
+
+                ctx.fillStyle = '#3b82f6';
+                ctx.font = 'bold 24px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('GRID MEMORIES', resultCanvas.width / 2, padding + 25);
+
+                const positions = [
+                    { x: padding, y: padding + headerHeight },
+                    { x: padding + halfWidth + gap, y: padding + headerHeight },
+                    { x: padding, y: padding + headerHeight + halfHeight + gap },
+                    { x: padding + halfWidth + gap, y: padding + headerHeight + halfHeight + gap }
+                ];
+
+                capturedImages.forEach((img, index) => {
+                    const pos = positions[index];
+                    ctx.drawImage(img, pos.x, pos.y, halfWidth, halfHeight);
+                });
+            }
+
+            resultContainer.classList.remove('hidden');
+            resultContainer.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Download Hasil Strip Foto
+        function downloadPhoto() {
+            const link = document.createElement('a');
+            link.download = `photobooth-${selectedTemplate}.png`;
+            link.href = resultCanvas.toDataURL('image/png');
+            link.click();
+        }
+
+        // Reset Aplikasi
+        function resetApp() {
+            resultContainer.classList.add('hidden');
+            startBtn.disabled = false;
+            startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            statusText.innerText = 'Siap mengambil foto';
+        }
+    </script>
+</body>
+</html>
